@@ -1,0 +1,605 @@
+---
+title: "Attempt at automatic detail detection"
+author: "Reid Coppola"
+date: ""
+output: 
+  pdf_document:
+    fig_height: 9
+    fig_width: 15
+  html_document:
+    fig_height: 3
+    fig_width: 5
+  word_document:
+    fig_height: 3
+    fig_width: 5
+---
+
+```{r, setup, include=FALSE}
+require(mosaic)   # Load additional packages here 
+knitr::opts_chunk$set(
+  tidy=FALSE,     # display code as typed
+  size="small")   # slightly smaller font for code
+```
+
+
+# First, I must find a way to cut up images in r
+
+```{r}
+require(imager)
+require(gasper)
+
+LH<-load.image("lighthouse.jpg")
+
+```
+
+# Detail Detection Idea
+
+We will have a vertical line "scan" the width of an mxn image left to right by doing a for loop for img[1:i,,,]
+
+this will grab every size matrix from the first line of pixels on the left, until the complete image is grabbed on the right. With every matrix grabbed, we will also get a matrix of size img[i+1:m,,,]
+
+We can have the function run svd on all of these outputs, and then grab the blocks with the greatest product of the difference of their first two consecutive singular values. I believe this is a way to grab the two matrices with the lowest detail, and then hopefully we can discard lots of the data.
+
+We can then repeat this from right to left, top to bottom, bottom to top
+
+If we can make a system that can successfully identify low detail blocks, we can feed it limiting parameters, such as saying we want to divide the image into no more than k blocks
+
+# issues with idea
+
+There are several issues with this idea. I think its likely that the code will be biased towards grabbing incredibly small chunks of the image, blocks only 1-2 pixels in width. it is also not a good method for grabbing areas in the center of the image that are bordered by high detail areas. However the iteration is feasible, we may just need to enact some limits.
+
+Also, if we were to identify a block floating in the middle of the image, that has some effect on what the other blocks will be, as ultimately we need to have several rectangles that sum to our image.
+
+
+```{r}
+
+# my goal for the function is to have it search the image right to left, and top to bottom storing all paired matrices. Then some measure of comparison has to be applied to choose where we want to split the matrix, and whether we should start with a left to right, or top to bottom split.
+
+
+
+
+
+
+
+FindDetail <-function(i, e){
+  i<-grayscale(i)
+  
+  W=dim(i)[1]
+  H=dim(i)[2]
+  
+  CRatioListV=c()
+  CRatioListH=c()
+  PSNRListV=c()
+  PSNRListH=c()
+  
+  #Grab all left-right matrices
+  for (x in 2:(W-2)){
+    Left1<-as.cimg(i[1:x,,,])
+    Right1<-as.cimg(i[(x+1):W,,,])
+  
+    LeftSVD1=svd(Left1)
+    RightSVD1=svd(Right1)
+    
+    LeftRank1=(sum((cumsum(LeftSVD1$d)/sum(LeftSVD1$d)) <= e))+2
+    RightRank1=(sum((cumsum(RightSVD1$d)/sum(RightSVD1$d)) <= e))+2
+
+    x2=W-x
+    
+    CRatioV=(x/W)*((LeftRank1*(x+H))/(x*H))+(x2/W)*((RightRank1*(x2+H))/(x2*H))
+
+    CRatioListV=c(CRatioListV, CRatioV)
+  }
+  print("Scan LR success")
+  
+  for (x in 2:(H-2)){
+    Top<-as.cimg(i[,1:x,,])
+    Bottom<-as.cimg(i[,(x+1):H,,])
+  
+    TopSVD=svd(Top)
+    BottomSVD=svd(Bottom)
+    
+    TopRank=(sum((cumsum(TopSVD$d)/sum(TopSVD$d)) <= e))+2
+    BottomRank=(sum((cumsum(BottomSVD$d)/sum(BottomSVD$d)) <= e))+2
+    
+    
+    x2=H-x
+    
+    CRatioH=(x/H)*((TopRank*(x+W))/(x*W))+(x2/H)*((BottomRank*(x2+W))/(x2*W))
+    
+    CRatioListH=c(CRatioListH, CRatioH)
+  }
+  print("Scan TB success")
+  
+  ###CREATE BEST LR COMP IMAGE
+  MinLR=which.min(CRatioListV)
+  
+  Left<-as.cimg(i[1:(MinLR-2),,,])
+  Right<-as.cimg(i[(MinLR-1):W,,,])
+  
+  LeftSVD=svd(Left)
+  RightSVD=svd(Right)
+    
+  LeftRank=(sum((cumsum(LeftSVD$d)/sum(LeftSVD$d)) <= e))+2
+  RightRank=(sum((cumsum(RightSVD$d)/sum(RightSVD$d)) <= e))+2
+    
+  LeftComp <- LeftSVD$u[,1:LeftRank] %*% diag(LeftSVD$d[1:LeftRank]) %*% t(LeftSVD$v[,1:LeftRank])
+  RightComp <- RightSVD$u[,1:RightRank] %*% diag(RightSVD$d[1:RightRank]) %*% t(RightSVD$v[,1:RightRank])
+    
+  CompLR=as.cimg(rbind(LeftComp, RightComp))
+  
+  print("Create optimal LR matrix success")
+  
+  ###CREATE BEST TB COMP IMAGE
+  MinTB=which.min(CRatioListH)
+  
+  
+  
+  Top<-as.cimg(i[,1:(MinTB-2),,])
+  Bottom<-as.cimg(i[,(MinTB-1):H,,])
+  
+  TopSVD=svd(Top)
+  BottomSVD=svd(Bottom)
+    
+  TopRank=(sum((cumsum(TopSVD$d)/sum(TopSVD$d)) <= e))+2
+  BottomRank=(sum((cumsum(BottomSVD$d)/sum(BottomSVD$d)) <= e))+2
+  
+  
+  TopComp <- TopSVD$u[,1:TopRank] %*% diag(TopSVD$d[1:TopRank]) %*% t(TopSVD$v[,1:TopRank])
+  BottomComp <- BottomSVD$u[,1:BottomRank] %*% diag(BottomSVD$d[1:BottomRank]) %*% t(BottomSVD$v[,1:BottomRank])
+    
+  CompTB=as.cimg(cbind(TopComp, BottomComp))
+  
+  print("Creat Optimal TB matrix success")
+  ###Top ten PSNR Lists
+  for (x in 1:25){
+    
+    ###LR
+    g=order(CRatioListV)[x]
+    
+    print(dim(Left1))
+    print(dim(Right2))
+    
+    Left1<-as.cimg(i[1:(g-2),,,])
+    Right1<-as.cimg(i[(g-1):W,,,])
+  
+    LeftSVD1=svd(Left1)
+    RightSVD1=svd(Right1)
+    
+    LeftRank1=(sum((cumsum(LeftSVD1$d)/sum(LeftSVD1$d)) <= e))+2
+    RightRank1=(sum((cumsum(RightSVD1$d)/sum(RightSVD1$d)) <= e))+2
+    
+    
+    LeftComp1 <- LeftSVD1$u[,1:LeftRank1] %*% diag(LeftSVD1$d[1:LeftRank1]) %*% t(LeftSVD1$v[,1:LeftRank1])
+    RightComp1 <- RightSVD1$u[,1:RightRank1] %*% diag(RightSVD1$d[1:RightRank1]) %*% t(RightSVD1$v[,1:RightRank1])
+    
+    
+    
+    PSNRV=PSNR(i,(as.cimg(rbind(LeftComp1, RightComp1))))
+    
+    
+    
+    PSNRListV=c(PSNRListV, PSNRV)
+    
+    print("Here?1")
+    
+    ###TB
+    j=order(CRatioListH)[x]
+    
+    Top<-as.cimg(i[,1:(j-2),,])
+    Bottom<-as.cimg(i[,(j-1):H,,])
+    
+    print("Here?2")
+  
+    TopSVD=svd(Top)
+    BottomSVD=svd(Bottom)
+    
+    TopRank=(sum((cumsum(TopSVD$d)/sum(TopSVD$d)) <= e))+2
+    BottomRank=(sum((cumsum(BottomSVD$d)/sum(BottomSVD$d)) <= e))+2
+    
+
+    
+    TopComp <- TopSVD$u[,1:TopRank] %*% diag(TopSVD$d[1:TopRank]) %*% t(TopSVD$v[,1:TopRank])
+    BottomComp <- BottomSVD$u[,1:BottomRank] %*% diag(BottomSVD$d[1:BottomRank]) %*% t(BottomSVD$v[,1:BottomRank])
+    
+    PSNRH=PSNR(i,(as.cimg(cbind(TopComp, BottomComp))))
+    
+    print("Here?3")
+    
+    PSNRListH=c(PSNRListH, PSNRH)
+    
+  }
+  print("Create PSNR Lists")
+  ###Return List
+  ReturnList=list("RatioListLR"= CRatioListV,"RatioListTB"= CRatioListH,
+                  "PSNRListLR"=PSNRListV, "PSNRListTB"=PSNRListH,
+                  "ImageL" = Left, "ImageR" = Right,
+                  "ImageT" = Top, "ImageB" = Bottom,
+                  "CompImageLR"= CompLR,"CompImageTB"= CompTB,
+                  "CRMinLR"=c(which.min(CRatioListV), min(CRatioListV), PSNRListV[1]),
+                  "CRMinTB"=c(which.min(CRatioListH), min(CRatioListH), PSNRListH[1]),
+                  "PSNRMaxLR"=c(order(CRatioListV)[which.max(PSNRListV)], max(PSNRListV),    
+                  CRatioListV[order(CRatioListV)[which.max(PSNRListV)]]),
+                  "PSNRMaxTB"=c(order(CRatioListH)[which.max(PSNRListH)], max(PSNRListH), 
+                  CRatioListH[order(CRatioListH)[which.max(PSNRListH)]]))
+  
+  return(ReturnList)
+  
+
+}
+
+
+
+
+
+
+
+
+```
+
+```{r}
+
+
+
+
+FindDetail2 <-function(i, e){
+  i<-grayscale(i)
+  
+  W=dim(i)[1]
+  H=dim(i)[2]
+  
+  CRatioListV=c()
+  CRatioListH=c()
+  PSNRListV=c()
+  PSNRListH=c()
+  
+  #Grab all left-right matrices
+  for (x in 2:(W-2)){
+    Left1<-as.cimg(i[1:x,,,])
+    Right1<-as.cimg(i[(x+1):W,,,])
+  
+    LeftSVD1=svd(Left1)
+    RightSVD1=svd(Right1)
+    
+    LeftRank1=(sum((cumsum(LeftSVD1$d)/sum(LeftSVD1$d)) <= e))+2
+    RightRank1=(sum((cumsum(RightSVD1$d)/sum(RightSVD1$d)) <= e))+2
+
+    x2=W-x
+    
+    CRatioV=(x/W)*((LeftRank1*(x+H))/(x*H))+(x2/W)*((RightRank1*(x2+H))/(x2*H))
+
+    CRatioListV=c(CRatioListV, CRatioV)
+  }
+  print("Scan LR success")
+  
+  for (x in 2:(H-2)){
+    Top<-as.cimg(i[,1:x,,])
+    Bottom<-as.cimg(i[,(x+1):H,,])
+  
+    TopSVD=svd(Top)
+    BottomSVD=svd(Bottom)
+    
+    TopRank=(sum((cumsum(TopSVD$d)/sum(TopSVD$d)) <= e))+2
+    BottomRank=(sum((cumsum(BottomSVD$d)/sum(BottomSVD$d)) <= e))+2
+    
+    
+    x2=H-x
+    
+    CRatioH=(x/H)*((TopRank*(x+W))/(x*W))+(x2/H)*((BottomRank*(x2+W))/(x2*W))
+    
+    CRatioListH=c(CRatioListH, CRatioH)
+  }
+  print("Scan TB success")
+  
+  ###CREATE BEST LR COMP IMAGE
+  MinLR=which.min(CRatioListV)
+  
+  Left<-as.cimg(i[1:(MinLR-2),,,])
+  Right<-as.cimg(i[(MinLR-1):W,,,])
+  
+  LeftSVD=svd(Left)
+  RightSVD=svd(Right)
+    
+  LeftRank=(sum((cumsum(LeftSVD$d)/sum(LeftSVD$d)) <= e))+2
+  RightRank=(sum((cumsum(RightSVD$d)/sum(RightSVD$d)) <= e))+2
+    
+  LeftComp <- LeftSVD$u[,1:LeftRank] %*% diag(LeftSVD$d[1:LeftRank]) %*% t(LeftSVD$v[,1:LeftRank])
+  RightComp <- RightSVD$u[,1:RightRank] %*% diag(RightSVD$d[1:RightRank]) %*% t(RightSVD$v[,1:RightRank])
+    
+  CompLR=as.cimg(rbind(LeftComp, RightComp))
+  
+  print("Create optimal LR matrix success")
+  
+  ###CREATE BEST TB COMP IMAGE
+  MinTB=which.min(CRatioListH)
+  
+  
+  
+  Top<-as.cimg(i[,1:(MinTB-2),,])
+  Bottom<-as.cimg(i[,(MinTB-1):H,,])
+  
+  TopSVD=svd(Top)
+  BottomSVD=svd(Bottom)
+    
+  TopRank=(sum((cumsum(TopSVD$d)/sum(TopSVD$d)) <= e))+2
+  BottomRank=(sum((cumsum(BottomSVD$d)/sum(BottomSVD$d)) <= e))+2
+  
+  
+  TopComp <- TopSVD$u[,1:TopRank] %*% diag(TopSVD$d[1:TopRank]) %*% t(TopSVD$v[,1:TopRank])
+  BottomComp <- BottomSVD$u[,1:BottomRank] %*% diag(BottomSVD$d[1:BottomRank]) %*% t(BottomSVD$v[,1:BottomRank])
+    
+  CompTB=as.cimg(cbind(TopComp, BottomComp))
+  
+  print("Creat Optimal TB matrix success")
+
+  ###Return List
+  ReturnList=list("RatioListLR"= CRatioListV,"RatioListTB"= CRatioListH,
+                  "ImageL" = Left, "ImageR" = Right,
+                  "ImageT" = Top, "ImageB" = Bottom,
+                  "CompImageLR"= CompLR,"CompImageTB"= CompTB,
+                  "CRMinLR"=c(which.min(CRatioListV), min(CRatioListV)),
+                  "CRMinTB"=c(which.min(CRatioListH), min(CRatioListH)))
+                  
+  
+  return(ReturnList)
+  
+
+}
+
+
+
+
+
+
+
+```
+
+
+
+```{r}
+k=0.70
+
+ReturnList=FindDetail(LH, k)
+```
+
+
+
+```{r}
+
+
+
+
+ReturnList
+
+
+###Traditional SVD and values
+SVDBase=svd(grayscale(LH))
+Rank1=(sum((cumsum(SVDBase$d)/sum(SVDBase$d)) <= k))+2
+
+Rank1
+
+###Compression ratio Trad
+((Rank1*(640+360))/(640*360))
+
+###Compression ratio LR
+ReturnList$CRMinLR
+
+#Compression Ratio TB
+ReturnList$CRMinTB
+
+
+CompBase <- SVDBase$u[,1:Rank1] %*% diag(SVDBase$d[1:Rank1]) %*% t(SVDBase$v[,1:Rank1])
+
+###PSNR
+PSNR(grayscale(LH), as.cimg(CompBase))
+PSNR(grayscale(LH), ReturnList$CompImageLR)
+PSNR(grayscale(LH), ReturnList$CompImageTB)
+
+###Compressed images
+par(mfrow=c(3,1), mar=c(0,0,0,0))
+plot(as.cimg(CompBase), axes=FALSE)
+plot(ReturnList$CompImageLR, axes=FALSE)
+plot(ReturnList$CompImageTB, axes=FALSE)
+
+###Split Images
+par(mfrow=c(1,1), mar=c(0,0,0,0))
+plot(ReturnList$ImageL, axes=FALSE)
+plot(ReturnList$ImageR, axes=FALSE)
+plot(ReturnList$ImageT, axes=FALSE)
+plot(ReturnList$ImageB, axes=FALSE)
+
+
+#Error
+mean((as.matrix(grayscale(LH))-CompBase)^2)
+mean((as.matrix(grayscale(LH))-as.matrix(ReturnList$CompImageTB))^2)
+
+
+```
+
+# Carry out another split and make a final reconstruction
+
+```{r}
+ReturnList2=FindDetail2(ReturnList$ImageR, k)
+plot(ReturnList$ImageR)
+```
+
+
+
+```{r}
+
+
+###Compression ratio LR
+ReturnList2$CRMinLR
+
+#Compression Ratio TB
+ReturnList2$CRMinTB
+
+###Compressed and split Image
+plot(ReturnList2$CompImageTB, axes=FALSE)
+plot(ReturnList2$ImageT, axes=FALSE)
+plot(ReturnList2$ImageB, axes=FALSE)
+plot(ReturnList$ImageL)
+
+###Compression of bottom component
+dim(ReturnList$ImageL)
+dim(Lighthouse)
+dim(ReturnList2$CompImageTB)
+
+ComponentL=ReturnList$ImageL
+SVDCB=svd(ComponentL)
+Rank2=(sum((cumsum(SVDCB$d)/sum(SVDCB$d)) <= k))+2
+CRB=((Rank2*(169+360))/(169*360))
+CompBottom <- SVDCB$u[,1:Rank2] %*% diag(SVDCB$d[1:Rank2]) %*% t(SVDCB$v[,1:Rank2])
+
+#Final Reconstruction
+FinalReconstruction=as.cimg(rbind(CompBottom, as.matrix(ReturnList2$CompImageTB)))
+
+
+
+FinalCRatio=(169/640)*CRB+(471/640)*0.1885704
+FinalCRatio
+FinalPSNR=PSNR(grayscale(LH), FinalReconstruction)
+FinalPSNR
+
+par(mfrow=c(2,1), mar=c(0,0,0,0))
+plot(FinalReconstruction, axes=FALSE)
+plot(as.cimg(CompBase), axes=FALSE)
+
+
+```
+
+# Matching Compression ratio with traditional SVD to split method and examining how PSNR changes
+
+```{r}
+((17*(640+360))/(640*360))
+CompBaseMatch <- SVDBase$u[,1:17] %*% diag(SVDBase$d[1:17]) %*% t(SVDBase$v[,1:17])
+
+plot(as.cimg(CompBaseMatch), axes=FALSE)
+PSNR(as.matrix(grayscale(LH)), (CompBaseMatch))
+FinalPSNR
+
+```
+
+
+
+```{r}
+ReturnList3=FindDetail2(ReturnList$ImageT, k)
+```
+```{r}
+dim(ReturnList$ImageB)
+dim(Lighthouse)
+dim(ReturnList3$CompImageLR)
+
+ComponentB=ReturnList$ImageB
+SVDCB=svd(ComponentB)
+Rank2=(sum((cumsum(SVDCB$d)/sum(SVDCB$d)) <= k))+2
+CRB=((Rank2*(76+640))/(76*640))
+CompBottom <- SVDCB$u[,1:Rank2] %*% diag(SVDCB$d[1:Rank2]) %*% t(SVDCB$v[,1:Rank2])
+
+plot(as.cimg(ReturnList3$CompImageLR))
+
+FinalReconstruction=as.cimg(cbind( as.matrix(ReturnList3$CompImageLR), CompBottom))
+
+###Compression ratio LR
+ReturnList3$CRMinLR
+
+#Compression Ratio TB
+ReturnList3$CRMinTB
+
+dim(FinalReconstruction)
+
+FinalCRatio=(76/360)*CRB+(284/360)*0.02050506
+FinalCRatio
+FinalPSNR=PSNR(grayscale(LH), FinalReconstruction)
+FinalPSNR
+
+par( mar=c(0,0,0,0))
+plot(FinalReconstruction, axes=FALSE)
+plot(as.cimg(CompBase), axes=FALSE)
+
+plot(ReturnList3$ImageL)
+plot(ReturnList3$ImageR)
+
+dim(ReturnList3$ImageL)
+
+
+
+
+par(mar=c(0,0,0,0))
+plot(ReturnList$ImageB, axes=FALSE)
+plot(ReturnList3$ImageL, axes=FALSE)
+plot(ReturnList3$ImageR, axes=FALSE)
+
+dim(ReturnList$ImageB)
+dim(ReturnList3$ImageL)
+dim(ReturnList3$ImageR)
+```
+
+
+# FINAL COMPILE OF DATA
+
+
+
+
+```{r}
+###Traditional SVD method results
+
+#RANK
+Rank1
+
+#Compression Ratio
+((Rank1*(640+360))/(640*360))
+
+#PSNR
+PSNR(grayscale(LH), as.cimg(CompBase))
+
+###One Step Left Right Results
+
+#compression Ratio, PSNR
+ReturnList$CRMinLR
+
+###One Step Top Bottom Results
+
+#Compression Ratio, PSNR
+ReturnList$CRMinTB
+
+###Two Step Compression Results
+
+#Compression Ratio Two step
+FinalCRatio
+
+#PSNR Two Step
+FinalPSNR
+
+###Traditonal SVD matched to Split method Compression Ratio
+
+#Compression Ratio trad
+((33*(640+360))/(640*360))
+
+#PSNR trad
+PSNR(as.matrix(grayscale(LH)), (CompBaseMatch))
+
+
+
+par(mfrow=c(2,1), mar=c(0,0,0,0))
+plot(as.cimg(CompBaseMatch), axes=FALSE)
+plot(FinalReconstruction, axes=FALSE)
+
+
+```
+# Error Images
+
+```{r}
+ErrorTrad=grayscale(LH)-as.cimg(CompBaseMatch)
+ErrorSplit=grayscale(LH)-FinalReconstruction
+
+
+par(mfrow=c(2,1), mar=c(0,0,0,0))
+plot(ErrorTrad, axes=FALSE)
+plot(ErrorSplit, axes=FALSE)
+
+plot(ReturnList$ImageR)
+plot(ReturnList2$ImageR)
+
+```
+
+
