@@ -1,0 +1,209 @@
+---
+title: "Untitled"
+author: ""
+date: ""
+output: 
+  html_document:
+    fig_height: 3
+    fig_width: 5
+  pdf_document:
+    fig_height: 3
+    fig_width: 5
+  word_document:
+    fig_height: 3
+    fig_width: 5
+---
+
+```{r, setup, include=FALSE}
+require(mosaic)   # Load additional packages here 
+knitr::opts_chunk$set(
+  tidy=FALSE,     # display code as typed
+  size="small")   # slightly smaller font for code
+```
+
+
+```{r}
+library(imager)
+library(abind)
+library(plotly)
+library(ggplot2)
+library(rgl)
+library(caret)
+```
+
+```{r}
+PaintByNumber <-function(x, k){
+  red = x[,,,1]
+  green = x[,,,2]
+  blue = x[,,,3]
+  
+  rgbdf<-data.frame(R=as.numeric(red),G=as.numeric(green),B=as.numeric(blue))
+  clusters=kmeans(rgbdf, k, iter.max=250)
+  rgbdf$clust <- factor(clusters$cluster)
+  
+  PixCol<-matrix(unlist(clusters$cluster), ncol = dim(x)[2], byrow = FALSE)
+  
+  means<-c(mean(rgbdf$R),mean(rgbdf$G),mean(rgbdf$B))
+  return(list("Map"=PixCol, "Centers"=clusters$centers, "df"=rgbdf, "means"=means))
+}
+
+ColReplace <- function(x, y, k){
+   #RED
+  redmat <-x
+  for (t in 1:k){
+    redmat[redmat == t] <- y[t,1]
+  }
+  #Green
+  greenmat <-x
+  for (t in 1:k){
+    greenmat[greenmat == t] <- y[t,2]
+  }
+  #BLUE
+  bluemat <-x
+  for (t in 1:k){
+    bluemat[bluemat == t] <- y[t,3]
+  }
+  CompMat<-abind(redmat,greenmat,bluemat, rev.along=0)
+  return(CompMat)
+}
+
+
+Posterize <- function(x,k){
+  y<-PaintByNumber(x, k)
+  z<-ColReplace(y$Map,y$Centers , k)
+  return(as.cimg(z))
+}
+
+LoadImages<- function(x){
+  rlist<-c()
+  lent<-length(x)
+  for (i in 1:lent){
+    rlist[[i]]<-load.image(x[i])
+    
+  }
+  return(rlist)
+}
+
+
+GatherMeans<-function(x, k){
+  rlist=list()
+  for (i in 1:length(x)){
+    rlist[[i]]=(ColorMeans(x[[i]], k))
+  }
+  return(rlist)
+}
+
+
+
+
+ColorMeans <-function(x, k){
+  red = x[,,,1]
+  green = x[,,,2]
+  blue = x[,,,3]
+  
+  rgbdf<-data.frame(R=as.numeric(red),G=as.numeric(green),B=as.numeric(blue))
+  #clusters=kmeans(rgbdf, k, iter.max=250)
+  #rgbdf$clust <- factor(clusters$cluster)
+  
+  #PixCol<-matrix(unlist(clusters$cluster), ncol = dim(x)[2], byrow = FALSE)
+  
+  means<-c(mean(rgbdf$R),mean(rgbdf$G),mean(rgbdf$B))
+  #return(list("Map"=PixCol, "Centers"=clusters$centers, "df"=rgbdf, "means"=means))
+  return(means)
+}
+
+#takes an image and a k value
+ClustCenters <-function(x, k){
+  red = x[,,,1]
+  green = x[,,,2]
+  blue = x[,,,3]
+  
+  rgbdf<-data.frame(R=as.numeric(red),G=as.numeric(green),B=as.numeric(blue))
+  clusters=kmeans(rgbdf, k, iter.max=250)
+  
+
+  return(("Centers"=clusters$centers))
+}
+
+#takes a list of loaded images and a k vale
+VarDF<-function(x, k){
+  df<-data.frame()
+  for (i in 1:length(x)){
+    #Define y as the variance of the first color values: a 3x3 matrix
+    y<-var(ClustCenters(Loadedn[[i]], k))
+    df<-rbind(df, c(y[,1], y[5:6], y[9]))
+    
+    
+  }
+  colnames(df)<-c("RR","RG","RB","GG","GB","BB")
+  return(df)
+}
+
+```
+
+```{r}
+loadn<-list.files("~/rstudio docs/imagedatan", pattern="*.jpg", full.names = T)
+loadu<-list.files("~/rstudio docs/imagedatau", pattern="*.jpg", full.names = T)
+
+
+Loadedn<-LoadImages(loadn)
+Loadedu<-LoadImages(loadu)
+
+```
+
+
+```{r}
+
+DFU<-sapply(Loadedu, FUN = ColorMeans, k=10)%>%t%>%data.frame()
+DFN<-sapply(Loadedn, FUN = ColorMeans, k=10)%>%t%>%data.frame()
+
+DFImage<-rbind(DFU, DFN)
+
+colnames(DFImage)<-c("Red", "Green", "Blue")
+DFImage$Type<-c(rep(0,40), rep(1,40))
+
+DFImage
+
+logitmod=glm(Type~Red+Blue+Green, family=binomial(link="logit"), data=DFImage)
+predlist<-predict(logitmod, newdata=DFImage, type="response")
+
+d<-confusionMatrix(table(predict(logitmod, type="response") >= 0.5,
+                      DFImage$Type == 1))
+
+```
+
+```{r}
+var(ClustCenters(Loadedn[[1]], k))
+
+```
+
+#Centroids
+
+```{r}
+NVar<-VarDF(Loadedn, 5)
+UVar<-VarDF(Loadedu,5)
+
+DFVar<-rbind(UVar, NVar)
+DFVar$Type<-c(rep(0,40), rep(1,40))
+
+logitmod=glm(Type~RR+RG+RB+GG+GB+BB, family=binomial(link="logit"), data=DFVar)
+predlist<-predict(logitmod, newdata=DFVar, type="response")
+
+confusionMatrix(table(predict(logitmod, type="response") >= 0.5,
+                      DFVar$Type == 1))
+
+```
+
+
+```{r}
+DFImage$Type<-NULL
+DFTotal<-cbind(DFImage, DFVar)
+
+logitmod=glm(Type~Red+Green+Blue+RR+RG+RB+GG+GB+BB, family=binomial(link="logit"), data=DFTotal)
+predlist<-predict(logitmod, newdata=DFTotal, type="response")
+
+confusionMatrix(table(predict(logitmod, type="response") >= 0.5,
+                      DFTotal$Type == 1))
+
+```
+

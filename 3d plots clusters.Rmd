@@ -1,0 +1,196 @@
+---
+title: "Untitled"
+author: ""
+date: ""
+output: 
+  html_document:
+    fig_height: 3
+    fig_width: 5
+  pdf_document:
+    fig_height: 3
+    fig_width: 5
+  word_document:
+    fig_height: 3
+    fig_width: 5
+---
+
+```{r, setup, include=FALSE}
+require(mosaic)   # Load additional packages here 
+knitr::opts_chunk$set(
+  tidy=FALSE,     # display code as typed
+  size="small")   # slightly smaller font for code
+```
+
+
+Delete this sentence and enter your text here.
+
+```{r}
+require(imager)
+require(abind)
+require(plotly)
+library(rgl)
+
+Lighthouse<-load.image("Nationaly_Theatre.jpg")
+
+dim(Lighthouse)
+
+
+```
+
+
+```{r}
+Lighthouse<-load.image("lighthouse.jpg")
+col3<-load.image("3col.jpg")
+
+dim(Lighthouse)
+
+#grab color matrices
+red = Lighthouse[,,,1]
+green = Lighthouse[,,,2]
+blue = Lighthouse[,,,3]
+
+dim(blue)
+
+
+#second image color matrices
+red1=col3[,,1]
+green3=col3[,,3]
+blue2=col3[,,2]
+
+
+R=red[,1]
+G=green[,1]
+B=blue[,1]
+
+as.list(R)
+
+rgbdf<-data.frame(R=as.numeric(red),G=as.numeric(green),B=as.numeric(blue))
+dim(rgbdf)
+
+print(rgbdf)
+
+```
+
+
+```{r}
+plot(Lighthouse)
+plot(col3)
+
+#3d plot of Lighthouse image colors
+plot_ly(x = rgbdf$R, y = rgbdf$G, z = rgbdf$B, size=1)
+
+#3d plot of 3col image colors
+plot_ly(x = jitter(red1[,1], 5),y = jitter(green3[,1],5), z = jitter(blue2[,1], 5), size=1)
+```
+
+
+```{r}
+
+
+
+#K cluster
+clusters=kmeans(rgbdf, 4, iter.max=200)
+
+#Turn the k clusters into a factor variable
+rgbdf$clust <- factor(clusters$cluster)
+
+(clusters$cluster)
+
+#Plot of Cluster centers
+plot_ly(x = jitter(clusters$centers[,1], 1),y = jitter(clusters$centers[,2], 1), z = jitter(clusters$centers[,3],1), size=1)
+
+
+
+#Hexcodes for cluster centers
+colors=rgb(red=clusters$centers[,1] ,green=clusters$centers[,2], blue=clusters$centers[,3]  , maxColorValue=1)
+
+plot_ly(x = rgbdf$R, y = rgbdf$G, z = rgbdf$B, size=1, color=rgbdf$clust, colors=c("#366186", "#AEC6E2", "#98BEE7", "#BDC4CE", "#776760", "#ACB4BF", "#A6958A", "#70A6DA", "#F2E6DC", "#9EBBDB", "#ABBED6","#216C9D", "#07517D", "#8DB9E6", "#F2544E" ,"#B7BCC4", "#B3A195", "#BAC1CA", "#B8C7D9", "#A3C3E6", "#156393", "#3477A8","#3C342B", "#0C5A89", "#9B8B80", "#82B3E5", "#C3B2A7" ,"#AFBCCC", "#BBC5D1", "#8E8178", "#B1050C"))
+
+```
+
+
+
+```{r}
+S<-matrix(unlist(clusters$cluster), ncol = 360, byrow = FALSE)
+
+dim(S)
+dim(Lighthouse)[2]
+
+clusters$centers[,1][1]
+
+
+PaintByNumber <-function(x, k){
+  red = x[,,,1]
+  green = x[,,,2]
+  blue = x[,,,3]
+  
+  rgbdf<-data.frame(R=as.numeric(red),G=as.numeric(green),B=as.numeric(blue))
+  clusters=kmeans(rgbdf, k, iter.max=250)
+  rgbdf$clust <- factor(clusters$cluster)
+  
+  PixCol<-matrix(unlist(clusters$cluster), ncol = dim(x)[2], byrow = FALSE)
+  return(list("Map"=PixCol, "Centers"=clusters$centers))
+  
+}
+
+
+
+ColReplace <- function(x, y, k){
+  
+   #RED
+  redmat <-x
+  
+  for (t in 1:k){
+    redmat[redmat == t] <- y[t,1]
+  }
+  
+  #Green
+  greenmat <-x
+  
+  for (t in 1:k){
+    greenmat[greenmat == t] <- y[t,2]
+  }
+  
+  #BLUE
+  bluemat <-x
+  
+  for (t in 1:k){
+    bluemat[bluemat == t] <- y[t,3]
+  }
+  
+  
+  
+  
+  CompMat<-abind(redmat,greenmat,bluemat, rev.along=0)
+  
+  return(CompMat)
+  
+  
+}
+
+
+TRY1=ColReplace(S,clusters$centers,4)
+
+dim(TRY1)
+
+
+
+plot(as.cimg(TRY1), axes = FALSE)
+
+Brut<-load.image("Nationaly_Theatre.jpg")
+Frst<-load.image("forest.jpg")
+
+
+BrutPixCol<-PaintByNumber(Brut, 3)
+BrutPoster<-ColReplace(BrutPixCol$Map,BrutPixCol$Centers , 3)
+
+plot(as.cimg(BrutPoster))
+
+FrstPixCol<-PaintByNumber(Frst, 3)
+FrstPoster<-ColReplace(FrstPixCol$Map,FrstPixCol$Centers , 3)
+
+plot(as.cimg(FrstPoster))
+
+
+
+

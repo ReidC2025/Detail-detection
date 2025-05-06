@@ -1,0 +1,112 @@
+---
+title: "Untitled"
+author: ""
+date: ""
+output: 
+  html_document:
+    fig_height: 3
+    fig_width: 5
+  pdf_document:
+    fig_height: 3
+    fig_width: 5
+  word_document:
+    fig_height: 3
+    fig_width: 5
+---
+
+```{r, setup, include=FALSE}
+require(mosaic)   # Load additional packages here 
+knitr::opts_chunk$set(
+  tidy=FALSE,     # display code as typed
+  size="small")   # slightly smaller font for code
+```
+
+```{r}
+library(imager)
+library(OpenImageR)
+library(imagerExtra)
+library(ggpmisc)
+library(mosaic)
+require(abind)
+library(magick)
+require(image.LineSegmentDetector)
+```
+
+
+Load images
+
+
+```{r}
+LoadImages<- function(x){
+  rlist<-c()
+  lent<-length(x)
+  for (i in 1:lent){
+    rlist[[i]]<-load.image(x[i])
+    
+  }
+  return(rlist)
+}
+```
+
+```{r}
+loadn<-list.files("~/rstudio docs/imagedatan", pattern="*.jpg", full.names = T)
+loadu<-list.files("~/rstudio docs/imagedatau", pattern="*.jpg", full.names = T)
+
+
+Loadedn<-LoadImages(loadn)
+Loadedu<-LoadImages(loadu)
+```
+
+
+```{r}
+k=20
+
+PropYesVotes<-function(x){
+  mean(x$score>0)
+}
+
+
+grayscaleN<-sapply(Loadedn, FUN = grayscale)
+cannyN<-sapply(grayscaleN, FUN = cannyEdges, sigma=k)
+houghN<-lapply(cannyN, FUN=hough_line, data.frame=TRUE, ntheta=360)
+PropN<-sapply(houghN, FUN=PropYesVotes)
+
+grayscaleU<-sapply(Loadedu, FUN = grayscale)
+cannyU<-sapply(grayscaleU, FUN = cannyEdges, sigma=k)
+houghU<-lapply(cannyU, FUN=hough_line, data.frame=TRUE, ntheta=360)
+PropU<-sapply(houghU, FUN=PropYesVotes)
+
+tallyN=list()
+
+```
+
+
+```{r}
+DFTrain<-data.frame(Type=c(rep(0,40),rep(1,40)), PropTrue=c(PropN,PropU))
+
+logitnew<-glm(Type~PropTrue,family=binomial(link="logit"), data=DFTrain)
+confusionMatrix(table(predict(logitnew, type="response") >= 0.5,
+                      DFTrain$Type == 1))
+
+
+
+```
+
+
+```{r}
+
+
+
+
+```
+
+
+```{r}
+linesegments <- image_line_segment_detector(as.matrix(grayscale((n5))* 255),log_eps = 5)
+linesegments2<- image_line_segment_detector((as.matrix(grayscale((n5)))* 255),log_eps =0)
+
+cannyEdges(as.cimg(linesegments), sigma=k)
+
+
+```
+
